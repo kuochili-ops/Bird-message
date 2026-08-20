@@ -430,6 +430,21 @@
             return shape;
         }
 
+        function createEyeGroup(blueEyeMat, pupilMat, isRightSide = false) {
+            const eyeGroup = new THREE.Group();
+            
+            const blueIris = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.02, 16), blueEyeMat);
+            blueIris.rotation.x = Math.PI / 2;
+            eyeGroup.add(blueIris);
+
+            const pupil = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.025, 16), pupilMat);
+            pupil.rotation.x = Math.PI / 2;
+            pupil.position.z = isRightSide ? -0.01 : 0.01;
+            eyeGroup.add(pupil);
+
+            return eyeGroup;
+        }
+
         function buildFlappingBird() {
             birdGroup = new THREE.Group();
             birdGroup.position.y = 0.5;
@@ -468,22 +483,13 @@
             beakPartMesh.position.set(2.35, 0.57, 0);
             birdGroup.add(beakPartMesh);
 
-            const eyeGroupLeft = new THREE.Group();
-            eyeGroupLeft.position.set(1.2, 0.85, 0.075); 
-            
-            const blueIris = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.02, 16), blueEyeMat);
-            blueIris.rotation.x = Math.PI / 2;
-            eyeGroupLeft.add(blueIris);
-
-            const pupilLeft = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.025, 16), pupilMat);
-            pupilLeft.rotation.x = Math.PI / 2;
-            pupilLeft.position.z = 0.01;
-            eyeGroupLeft.add(pupilLeft);
-
+            // 修正眼睛：為左眼與右眼各自建立正確朝向的 3D 結構
+            const eyeGroupLeft = createEyeGroup(blueEyeMat, pupilMat, false);
+            eyeGroupLeft.position.set(1.2, 0.85, 0.065); 
             birdGroup.add(eyeGroupLeft);
 
-            const eyeGroupRight = eyeGroupLeft.clone();
-            eyeGroupRight.position.z = -0.075;
+            const eyeGroupRight = createEyeGroup(blueEyeMat, pupilMat, true);
+            eyeGroupRight.position.set(1.2, 0.85, -0.065);
             birdGroup.add(eyeGroupRight);
 
             const pullStringGeo = new THREE.BufferGeometry().setFromPoints([
