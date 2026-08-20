@@ -66,6 +66,22 @@
             min-height: 60px;
             font-family: inherit;
         }
+        .btn-action {
+            background: #3b82f6;
+            color: #fff;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 0.85rem;
+            transition: background 0.2s;
+            margin-top: 4px;
+            width: 100%;
+        }
+        .btn-action:hover {
+            background: #2563eb;
+        }
         #ui-body {
             display: none;
             border-top: 1px solid rgba(255, 255, 255, 0.2);
@@ -91,6 +107,7 @@
 平安喜樂
 飛鳥翱翔
 吉祥如意</textarea>
+                <button class="btn-action" onclick="copyShareURL()">🔗 複製訊息網址連結</button>
             </div>
             <div class="ui-group">
                 <div class="ui-row">
@@ -187,6 +204,26 @@
                     console.error("URL 解析失敗:", e);
                 }
             }
+        }
+
+        function copyShareURL() {
+            const rawText = document.getElementById('msg-input').value;
+            const lines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+            
+            if (lines.length === 0) {
+                alert("請先輸入告示訊息！");
+                return;
+            }
+
+            const paramValue = encodeURIComponent(lines.join(','));
+            const baseURL = window.location.origin + window.location.pathname;
+            const shareURL = `${baseURL}?msg=${paramValue}`;
+
+            navigator.clipboard.writeText(shareURL).then(() => {
+                alert("📋 分享網址已成功複製到剪貼簿！\n\n網址：" + shareURL);
+            }).catch(err => {
+                prompt("請手動複製以下網址：", shareURL);
+            });
         }
 
         function init() {
