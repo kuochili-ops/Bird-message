@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>𓃥 白六飛鳥訊息吊飾 (薄片對稱精準版)</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #1a1c23;
+            font-family: Arial, sans-serif;
+            user-select: none;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+        #ui-panel {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            background: rgba(20, 20, 30, 0.92);
+            color: #fff;
+            padding: 12px 16px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            backdrop-filter: blur(8px);
+            z-index: 10;
+            width: 300px;
+        }
+        #ui-header {
+            font-weight: bold;
+            font-size: 0.95rem;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .ui-group {
+            margin-top: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 0.85rem;
+        }
+        .ui-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .ui-group label { color: #ccc; }
+        .ui-group input[type="range"], .ui-group select, .ui-group textarea, .ui-group input[type="color"] {
+            background: #2a2a38;
+            color: #fff;
+            border: 1px solid #555;
+            border-radius: 4px;
+            padding: 4px 6px;
+        }
+        .ui-group textarea {
+            resize: vertical;
+            min-height: 60px;
+            font-family: inherit;
+        }
+        #ui-body {
+            display: none;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+            margin-top: 8px;
+            padding-top: 8px;
+        }
+        #ui-body.open { display: block; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+    <div id="ui-panel">
+        <div id="ui-header" onclick="toggleUI()">
+            <span>⚙️ 𓃥 白六飛鳥訊息吊飾設定</span>
+            <span id="collapse-icon">▼</span>
+        </div>
+        <div id="ui-body">
+            <div class="ui-group">
+                <label>告示訊息 (每行一張，輪播展示)：</label>
+                <textarea id="msg-input" onchange="updateMessageList()">風調雨順
+平安喜樂
+飛鳥翱翔
+吉祥如意</textarea>
+            </div>
+            <div class="ui-group">
+                <div class="ui-row">
+                    <label>中文字體：</label>
+                    <select id="font-select" onchange="renderPaperTextures()">
+                        <option value="DFKai-SB, BiauKai, 標楷体, serif">標楷體</option>
+                        <option value="'Microsoft JhengHei', sans-serif" selected>微軟正黑體</option>
+                        <option value="'PMingLiU', 'MingLiU', serif">新細明體</option>
+                    </select>
+                </div>
+            </div>
+            <div class="ui-group">
+                <div class="ui-row">
+                    <label>文字顏色：</label>
+                    <input type="color" id="text-color" value="#8b0000" onchange="renderPaperTextures()">
+                </div>
+            </div>
+            <div class="ui-group">
+                <div class="ui-row">
+                    <label>紙條底色：</label>
+                    <input type="color" id="paper-color" value="#fcf7e8" onchange="renderPaperTextures()">
+                </div>
+            </div>
+            <div class="ui-group">
+                <div class="ui-row">
+                    <label>檢視模式：</label>
+                    <select id="view-mode" onchange="changeMode()">
+                        <option value="hang" selected>吊飾展示 (180度翻轉輪播)</option>
+                        <option value="explode">組裝拆解 (爆炸圖)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="ui-group">
+                <div class="ui-row">
+                    <label>手拉拍打頻率：</label>
+                    <input type="range" id="flap-speed" min="0" max="0.015" step="0.0005" value="0.003">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <script>
+        let scene, camera, renderer, controls;
+        let mobileGroup, birdGroup;
+        let leftWingPivot, rightWingPivot, tailPivot, pullStringMesh;
+        let leftWingMesh, rightWingMesh, leftRingMesh, rightRingMesh;
+        let leftStringLine, rightStringLine;
+        
+        let paperGroup;
+        let frontCanvas, frontCtx, frontTexture;
+        let backCanvas, backCtx, backTexture;
+        let mode = 'hang';
+
+        let messageList = ["風調雨順", "平安喜樂", "飛鳥翱翔", "吉祥如意"];
+        let currentFrontMsgIndex = 0;
+        let currentBackMsgIndex = 1;
+        let animState = 'DISPLAY';
+        let stateStartTime = 0;
+        let targetRotationY = 0;   
+        let startRotationY = 0;    
+        let isFrontShowing = true; 
+
+        const extrudeSettings = {
+            depth: 0.10,
+            bevelEnabled: true,
+            bevelSegments: 2,
+            steps: 1,
+            bevelSize: 0.012,
+            bevelThickness: 0.012
+        };
+
+        const HANG_OFFSET_Z = 1.3;
+        const TOP_BAR_Y = 4.2;
+
+        function checkURLParams() {
+            const params = new URLSearchParams(window.location.search);
+            const msgParam = params.get('msg') || params.get('m');
+            
+            if (msgParam) {
+                try {
+                    const decoded = decodeURIComponent(msgParam);
+                    let lines = decoded.includes(',') ? decoded.split(',') : decoded.split('\n');
+                    lines = lines.map(item => item.trim()).filter(item => item.length > 0);
+                    
+                    if (lines.length > 0) {
+                        document.getElementById('msg-input').value = lines.join('\n');
+                        messageList = lines;
+                        currentFrontMsgIndex = 0;
+                        currentBackMsgIndex = (messageList.length > 1) ? 1 : 0;
+                    }
+                } catch (e) {
+                    console.error("URL 解析失敗:", e);
+                }
+            }
+        }
+
+        function init() {
+            checkURLParams();
+
+            const container = document.getElementById('canvas-container');
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1c23);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(7, 3, 12);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.target.set(0, -0.5, 0);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xfffaed, 1.2);
+            dirLight.position.set(12, 20, 15);
+            dirLight.castShadow = true;
+            scene.add(dirLight);
+
+            const fillLight = new THREE.DirectionalLight(0x6688aa, 0.4);
+            fillLight.position.set(-12, -10, -10);
+            scene.add(fillLight);
+
+            mobileGroup = new THREE.Group();
+            scene.add(mobileGroup);
+
+            initPaperCanvases();
+            buildHangingFrame();
+            buildFlappingBird();
+
+            stateStartTime = Date.now();
+
+            window.addEventListener('resize', onWindowResize);
+            animate();
+        }
+
+        function initPaperCanvases() {
+            frontCanvas = document.createElement('canvas');
+            frontCanvas.width = 128; frontCanvas.height = 512;
+            frontCtx = frontCanvas.getContext('2d');
+            frontTexture = new THREE.CanvasTexture(frontCanvas);
+
+            backCanvas = document.createElement('canvas');
+            backCanvas.width = 128; backCanvas.height = 512;
+            backCtx = backCanvas.getContext('2d');
+            backTexture = new THREE.CanvasTexture(backCanvas);
+
+            renderPaperTextures();
+        }
+
+        function renderPaperTextures() {
+            if (!frontCtx || !backCtx) return;
+
+            const paperColor = document.getElementById('paper-color').value;
+            const textColor = document.getElementById('text-color').value;
+            const fontFamily = document.getElementById('font-select').value;
+            const w = 128, h = 512;
+
+            frontCtx.fillStyle = paperColor;
+            frontCtx.fillRect(0, 0, w, h);
+            frontCtx.strokeStyle = '#d4af37';
+            frontCtx.lineWidth = 6;
+            frontCtx.strokeRect(8, 8, w - 16, h - 16);
+
+            const frontText = messageList[currentFrontMsgIndex] || "";
+            if (frontText.length > 0) {
+                let fontSize = Math.floor((h - 60) / frontText.length);
+                fontSize = Math.min(fontSize, 72);
+
+                frontCtx.fillStyle = textColor;
+                frontCtx.font = `bold ${fontSize}px ${fontFamily}`;
+                frontCtx.textAlign = 'center';
+                frontCtx.textBaseline = 'middle';
+
+                const startY = (h - (frontText.length - 1) * fontSize) / 2;
+                for (let i = 0; i < frontText.length; i++) {
+                    frontCtx.fillText(frontText.charAt(i), w / 2, startY + i * fontSize);
+                }
+            }
+            frontTexture.needsUpdate = true;
+
+            backCtx.fillStyle = paperColor;
+            backCtx.fillRect(0, 0, w, h);
+            backCtx.strokeStyle = '#d4af37';
+            backCtx.lineWidth = 6;
+            backCtx.strokeRect(8, 8, w - 16, h - 16);
+
+            const backText = messageList[currentBackMsgIndex] || "";
+            if (backText.length > 0) {
+                let fontSize = Math.floor((h - 60) / backText.length);
+                fontSize = Math.min(fontSize, 72);
+
+                backCtx.fillStyle = textColor;
+                backCtx.font = `bold ${fontSize}px ${fontFamily}`;
+                backCtx.textAlign = 'center';
+                backCtx.textBaseline = 'middle';
+
+                backCtx.save();
+                backCtx.translate(w, 0);
+                backCtx.scale(-1, 1);
+
+                const startY = (h - (backText.length - 1) * fontSize) / 2;
+                for (let i = 0; i < backText.length; i++) {
+                    backCtx.fillText(backText.charAt(i), w / 2, startY + i * fontSize);
+                }
+                backCtx.restore();
+            }
+            backTexture.needsUpdate = true;
+        }
+
+        function updateMessageList() {
+            const rawText = document.getElementById('msg-input').value;
+            messageList = rawText.split('\n').filter(line => line.trim().length > 0);
+            if (messageList.length === 0) messageList = [""];
+            currentFrontMsgIndex = 0;
+            currentBackMsgIndex = (messageList.length > 1) ? 1 : 0;
+            renderPaperTextures();
+        }
+
+        function buildHangingFrame() {
+            const rodLength = HANG_OFFSET_Z * 2 + 0.8;
+            const rodGeo = new THREE.CylinderGeometry(0.08, 0.08, rodLength, 16);
+            const rodMat = new THREE.MeshStandardMaterial({ color: 0xc5a059, roughness: 0.4 });
+            const rod = new THREE.Mesh(rodGeo, rodMat);
+            rod.rotation.x = Math.PI / 2;
+            rod.position.set(0.2, TOP_BAR_Y, 0);
+            rod.castShadow = true;
+            mobileGroup.add(rod);
+
+            const topCeilingLineGeo = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0.2, TOP_BAR_Y + 3, 0),
+                new THREE.Vector3(0.2, TOP_BAR_Y, 0)
+            ]);
+            mobileGroup.add(new THREE.Line(topCeilingLineGeo, new THREE.LineBasicMaterial({ color: 0x888888 })));
+
+            const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
+
+            const leftLineGeo = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0.2, TOP_BAR_Y, HANG_OFFSET_Z),
+                new THREE.Vector3(0.2, 0.5, HANG_OFFSET_Z)
+            ]);
+            leftStringLine = new THREE.Line(leftLineGeo, lineMat);
+            mobileGroup.add(leftStringLine);
+
+            const rightLineGeo = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0.2, TOP_BAR_Y, -HANG_OFFSET_Z),
+                new THREE.Vector3(0.2, 0.5, -HANG_OFFSET_Z)
+            ]);
+            rightStringLine = new THREE.Line(rightLineGeo, lineMat);
+            mobileGroup.add(rightStringLine);
+        }
+
+        function createStandardBodyShape() {
+            const shape = new THREE.Shape();
+            shape.moveTo(-2.8, -0.2);
+            shape.bezierCurveTo(-1.8, -1.2, 0.2, -1.5, 1.2, -0.8);
+            shape.bezierCurveTo(2.0, -0.2, 2.8, 0.2, 3.2, 0.7);
+            shape.bezierCurveTo(3.0, 1.2, 2.2, 1.5, 1.5, 1.1);
+            shape.bezierCurveTo(0.2, 0.7, -1.5, 0.5, -2.8, -0.2);
+            return shape;
+        }
+
+        function createAdjustedFullBeakShape() {
+            const shape = new THREE.Shape();
+            shape.moveTo(1.68, -0.32);                          
+            shape.bezierCurveTo(2.4, -0.2, 2.9, 0.25, 3.22, 0.72); 
+            shape.bezierCurveTo(3.0, 1.28, 2.5, 1.48, 1.83, 1.22); 
+            shape.bezierCurveTo(1.48, 0.7, 1.48, 0.1, 1.68, -0.32); 
+            shape.closePath();
+            return shape;
+        }
+
+        function createLeverOptimizedWingShape() {
+            const shape = new THREE.Shape();
+            shape.moveTo(0, -0.5);
+            shape.lineTo(0, 0.5);
+            shape.bezierCurveTo(0.8, 0.7, 1.2, 0.8, HANG_OFFSET_Z, 0.9);
+            shape.bezierCurveTo(2.2, 1.4, 3.8, 1.3, 5.2, 0.6);
+            shape.bezierCurveTo(4.2, -0.2, 3.2, -0.6, 2.2, -0.5);
+            shape.bezierCurveTo(1.2, -0.5, 0.5, -0.5, 0, -0.5);
+            return shape;
+        }
+
+        function createTailShape() {
+            const shape = new THREE.Shape();
+            shape.moveTo(0, 0);
+            shape.lineTo(-2.2, -0.9);
+            shape.quadraticCurveTo(-2.6, 0, -2.2, 0.9);
+            shape.lineTo(0, 0);
+            return shape;
+        }
+
+        function buildFlappingBird() {
+            birdGroup = new THREE.Group();
+            birdGroup.position.y = 0.5;
+            mobileGroup.add(birdGroup);
+
+            const bodyFrontMat = new THREE.MeshStandardMaterial({ color: 0x272a30, roughness: 0.5 });
+            const sideCutMat = new THREE.MeshStandardMaterial({ color: 0x3d2314, roughness: 0.8 }); 
+
+            const yellowBeakMat = new THREE.MeshStandardMaterial({ color: 0xfbc531, roughness: 0.3 });
+            const wingMat = new THREE.MeshStandardMaterial({ color: 0x3d4452, roughness: 0.6 });
+            const tailMat = new THREE.MeshStandardMaterial({ color: 0xd63031, roughness: 0.5 });
+            
+            const blueEyeMat = new THREE.MeshStandardMaterial({ color: 0x00a8ff, roughness: 0.1 });
+            const pupilMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+
+            const pinMat = new THREE.MeshStandardMaterial({ color: 0xd1ccc0, metalness: 0.8, roughness: 0.2 });
+            const ringMat = new THREE.MeshStandardMaterial({ color: 0xe1b12c, metalness: 0.9, roughness: 0.2 });
+
+            const bodyGeo = new THREE.ExtrudeGeometry(createStandardBodyShape(), extrudeSettings);
+            bodyGeo.center();
+            const bodyMesh = new THREE.Mesh(bodyGeo, [bodyFrontMat, sideCutMat]);
+            bodyMesh.castShadow = true;
+            birdGroup.add(bodyMesh);
+
+            const beakExtrudeSettings = {
+                depth: 0.11,
+                bevelEnabled: true,
+                bevelSegments: 2,
+                steps: 1,
+                bevelSize: 0.01,
+                bevelThickness: 0.01
+            };
+            const beakPartGeo = new THREE.ExtrudeGeometry(createAdjustedFullBeakShape(), beakExtrudeSettings);
+            beakPartGeo.center();
+            const beakPartMesh = new THREE.Mesh(beakPartGeo, [yellowBeakMat, sideCutMat]);
+            beakPartMesh.position.set(2.35, 0.57, 0);
+            birdGroup.add(beakPartMesh);
+
+            const eyeGroupLeft = new THREE.Group();
+            eyeGroupLeft.position.set(1.2, 0.85, 0.075); 
+            
+            const blueIris = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.02, 16), blueEyeMat);
+            blueIris.rotation.x = Math.PI / 2;
+            eyeGroupLeft.add(blueIris);
+
+            const pupilLeft = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.025, 16), pupilMat);
+            pupilLeft.rotation.x = Math.PI / 2;
+            pupilLeft.position.z = 0.01;
+            eyeGroupLeft.add(pupilLeft);
+
+            birdGroup.add(eyeGroupLeft);
+
+            const eyeGroupRight = eyeGroupLeft.clone();
+            eyeGroupRight.position.z = -0.075;
+            birdGroup.add(eyeGroupRight);
+
+            const pullStringGeo = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0, -0.6, 0),
+                new THREE.Vector3(0, -3.2, 0)
+            ]);
+            pullStringMesh = new THREE.Line(pullStringGeo, new THREE.LineBasicMaterial({ color: 0xcccccc }));
+            birdGroup.add(pullStringMesh);
+
+            const weightBall = new THREE.Mesh(
+                new THREE.SphereGeometry(0.28, 16, 16),
+                new THREE.MeshStandardMaterial({ color: 0xc5a059, roughness: 0.3 })
+            );
+            weightBall.position.set(0, -3.2, 0);
+            birdGroup.add(weightBall);
+
+            const subLineGeo = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0, -3.48, 0),
+                new THREE.Vector3(0, -4.0, 0)
+            ]);
+            const subLine = new THREE.Line(subLineGeo, new THREE.LineBasicMaterial({ color: 0xaaaaaa }));
+            birdGroup.add(subLine);
+
+            paperGroup = new THREE.Group();
+            paperGroup.position.set(0, -4.0, 0);
+
+            const paperGeo = new THREE.PlaneGeometry(0.8, 3.2);
+            paperGeo.translate(0, -1.6, 0);
+
+            const frontMesh = new THREE.Mesh(
+                paperGeo,
+                new THREE.MeshBasicMaterial({ map: frontTexture, side: THREE.FrontSide })
+            );
+            paperGroup.add(frontMesh);
+
+            const backMesh = new THREE.Mesh(
+                paperGeo,
+                new THREE.MeshBasicMaterial({ map: backTexture, side: THREE.BackSide })
+            );
+            backMesh.position.z = -0.001;
+            paperGroup.add(backMesh);
+
+            birdGroup.add(paperGroup);
+
+            const pinGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.5, 16);
+            const ringGeo = new THREE.TorusGeometry(0.07, 0.015, 8, 16);
+            const wingGeo = new THREE.ExtrudeGeometry(createLeverOptimizedWingShape(), extrudeSettings);
+
+            leftWingPivot = new THREE.Group();
+            leftWingPivot.position.set(0.2, 0.1, 0.07); 
+            birdGroup.add(leftWingPivot);
+
+            const leftPin = new THREE.Mesh(pinGeo, pinMat);
+            leftPin.rotation.z = Math.PI / 2;
+            leftWingPivot.add(leftPin);
+
+            leftWingMesh = new THREE.Mesh(wingGeo, [wingMat, sideCutMat]);
+            leftWingMesh.rotation.x = Math.PI / 2;
+            leftWingMesh.rotation.z = -Math.PI / 2;
+            leftWingMesh.castShadow = true;
+            leftWingPivot.add(leftWingMesh);
+
+            leftRingMesh = new THREE.Mesh(ringGeo, ringMat);
+            leftRingMesh.position.set(HANG_OFFSET_Z - 0.1, 0.05, 0);
+            leftWingMesh.add(leftRingMesh);
+
+            rightWingPivot = new THREE.Group();
+            rightWingPivot.position.set(0.2, 0.1, -0.07);
+            birdGroup.add(rightWingPivot);
+
+            const rightPin = new THREE.Mesh(pinGeo, pinMat);
+            rightPin.rotation.z = Math.PI / 2;
+            rightWingPivot.add(rightPin);
+
+            rightWingMesh = new THREE.Mesh(wingGeo, [wingMat, sideCutMat]);
+            rightWingMesh.rotation.x = -Math.PI / 2;
+            rightWingMesh.rotation.z = -Math.PI / 2;
+            rightWingMesh.castShadow = true;
+            rightWingPivot.add(rightWingMesh);
+
+            rightRingMesh = new THREE.Mesh(ringGeo, ringMat);
+            rightRingMesh.position.set(HANG_OFFSET_Z - 0.1, -0.05, 0);
+            rightWingMesh.add(rightRingMesh);
+
+            tailPivot = new THREE.Group();
+            tailPivot.position.set(-1.8, -0.1, 0);
+            birdGroup.add(tailPivot);
+
+            const tailGeo = new THREE.ExtrudeGeometry(createTailShape(), extrudeSettings);
+            const tail = new THREE.Mesh(tailGeo, [tailMat, sideCutMat]);
+            tail.rotation.x = Math.PI / 2;
+            tail.castShadow = true;
+            tailPivot.add(tail);
+        }
+
+        function updateSuspensionLines() {
+            if (!leftStringLine || !rightStringLine || !leftRingMesh || !rightRingMesh) return;
+
+            const leftWorldPos = new THREE.Vector3();
+            leftRingMesh.getWorldPosition(leftWorldPos);
+
+            const rightWorldPos = new THREE.Vector3();
+            rightRingMesh.getWorldPosition(rightWorldPos);
+
+            const leftBarTop = new THREE.Vector3(0.2, TOP_BAR_Y, HANG_OFFSET_Z);
+            const leftRingBottom = new THREE.Vector3(0.2, leftWorldPos.y, HANG_OFFSET_Z);
+
+            const rightBarTop = new THREE.Vector3(0.2, TOP_BAR_Y, -HANG_OFFSET_Z);
+            const rightRingBottom = new THREE.Vector3(0.2, rightWorldPos.y, -HANG_OFFSET_Z);
+
+            const leftPos = leftStringLine.geometry.attributes.position;
+            leftPos.setXYZ(0, leftBarTop.x, leftBarTop.y, leftBarTop.z);
+            leftPos.setXYZ(1, leftRingBottom.x, leftRingBottom.y, leftRingBottom.z);
+            leftPos.needsUpdate = true;
+
+            const rightPos = rightStringLine.geometry.attributes.position;
+            rightPos.setXYZ(0, rightBarTop.x, rightBarTop.y, rightBarTop.z);
+            rightPos.setXYZ(1, rightRingBottom.x, rightRingBottom.y, rightRingBottom.z);
+            rightPos.needsUpdate = true;
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function toggleUI() {
+            const body = document.getElementById('ui-body');
+            const icon = document.getElementById('collapse-icon');
+            body.classList.toggle('open');
+            icon.innerText = body.classList.contains('open') ? '▲' : '▼';
+        }
+
+        function changeMode() {
+            mode = document.getElementById('view-mode').value;
+        }
+
+        function easeInOutCubic(t) {
+            return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const now = Date.now();
+            const elapsed = now - stateStartTime;
+            const flapSpeed = parseFloat(document.getElementById('flap-speed').value);
+
+            if (animState === 'DISPLAY') {
+                if (elapsed >= 3000) {
+                    animState = 'ROTATE';
+                    stateStartTime = now;
+                    startRotationY = paperGroup.rotation.y;
+                    targetRotationY = startRotationY + Math.PI;
+                }
+            } else if (animState === 'ROTATE') {
+                const duration = 2000;
+                if (elapsed < duration) {
+                    const progress = elapsed / duration;
+                    const easeProgress = easeInOutCubic(progress);
+                    paperGroup.rotation.y = startRotationY + (targetRotationY - startRotationY) * easeProgress;
+                } else {
+                    paperGroup.rotation.y = targetRotationY;
+                    animState = 'DISPLAY';
+                    stateStartTime = now;
+                    isFrontShowing = !isFrontShowing;
+
+                    if (isFrontShowing) {
+                        currentBackMsgIndex = (currentFrontMsgIndex + 1) % messageList.length;
+                    } else {
+                        currentFrontMsgIndex = (currentBackMsgIndex + 1) % messageList.length;
+                    }
+                    renderPaperTextures();
+                }
+            }
+
+            if (mode === 'hang') {
+                mobileGroup.rotation.y += 0.0005;
+
+                const pullPhase = Math.sin(now * flapSpeed);
+                const bodyY = -pullPhase * 0.42;
+                birdGroup.position.y = 0.5 + bodyY;
+
+                const flapAngle = Math.asin(Math.min(Math.max(-bodyY / HANG_OFFSET_Z, -0.85), 0.85));
+
+                leftWingPivot.rotation.x = flapAngle;
+                rightWingPivot.rotation.x = -flapAngle;
+
+                tailPivot.rotation.z = Math.sin(now * 0.0008) * 0.05;
+
+                pullStringMesh.visible = true;
+
+            } else if (mode === 'explode') {
+                mobileGroup.rotation.y = THREE.MathUtils.lerp(mobileGroup.rotation.y, 0, 0.05);
+                birdGroup.position.set(0, 0, 0);
+                birdGroup.rotation.set(0, 0, 0);
+
+                leftWingPivot.rotation.x = THREE.MathUtils.lerp(leftWingPivot.rotation.x, 0, 0.1);
+                rightWingPivot.rotation.x = THREE.MathUtils.lerp(rightWingPivot.rotation.x, 0, 0.1);
+
+                leftWingPivot.position.lerp(new THREE.Vector3(0.2, 0.1, 3.5), 0.08);
+                rightWingPivot.position.lerp(new THREE.Vector3(0.2, 0.1, -3.5), 0.08);
+                tailPivot.position.lerp(new THREE.Vector3(-4.2, 0, 0), 0.08);
+                pullStringMesh.visible = false;
+            }
+
+            updateSuspensionLines();
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
